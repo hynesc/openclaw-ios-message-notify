@@ -5,24 +5,20 @@ import { Notifier, Transport, visibleText } from './core.mjs';
 export default definePluginEntry({
   configSchema: buildJsonPluginConfigSchema({"type": "object", "properties": {"nodeId": {"type": "string"}, "openclawBinary": {"type": "string"}, "genericPreview": {"type": "boolean", "default": false}, "agents": {"type": "array", "items": {"type": "string"}}, "sessions": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": false}),
   id: 'ios-message-notify', name: 'iOS Message Notifications',
-  description: 'Native iPhone alerts for visible agent messages and questions.',
+  description: 'Native iPhone alerts for completed responses, questions, and approvals.',
   register(api) {
     const config = api.pluginConfig ?? {};
     const transport = new Transport(config);
     let notifier: Notifier | undefined;
     const forward = (e: any) => { void notifier?.accept(e); };
-    api.on('message_sent', (e, ctx) => {
-      if (!e.success) return;
-      const sessionKey = e.sessionKey ?? ctx.sessionKey;
-      forward({ source: 'delivery', id: e.messageId, sessionKey,
-        agentId: sessionKey?.split(':')[1], runId: e.runId ?? ctx.runId,
-        text: visibleText({ role: 'assistant', content: e.content }) });
-    });
     api.on('agent_end', (e, ctx) => {
-      // Reconcile the final message only, never scan/re-notify historical context.
+      if (!e.success) return;
       const message: any = e.messages.at(-1);
-      forward({ source: 'final', id: message?.id, sessionKey: ctx.sessionKey,
-        agentId: ctx.agentId, runId: e.runId, text: visibleText(message) });
+      const runId = e.runId ?? ctx.runId;
+      forward({ source: 'final', kind: 'completed',
+        id: runId ? `completed:${runId}` : message?.id,
+        sessionKey: ctx.sessionKey, agentId: ctx.agentId,
+        runId, text: visibleText(message) });
     });
     api.registerService({
       id: 'ios-message-notify',
@@ -30,30 +26,18 @@ export default definePluginEntry({
         notifier = new Notifier({ config, file: join(ctx.stateDir, 'ios-message-notify', 'state.json'),
           send: (title, body) => transport.send(title, body), logger: ctx.logger });
         try { await notifier.load(); } catch (error) { notifier = undefined; throw error; }
-        unsub = api.runtime.events.onSessionTranscriptUpdate((e: any) => {
-          forward({ source: 'transcript', id: e.messageId ?? (e.messageSeq != null ? `seq:${e.messageSeq}` : undefined),
-            agentId: e.agentId ?? e.target?.agentId, sessionKey: e.sessionKey ?? e.target?.sessionKey,
-            runId: e.runId, text: visibleText(e.message) });
-        });
         unsubAgent = api.runtime.events.onAgentEvent((e: any) => {
           const d = e.data ?? {};
-          // Only committed assistant occurrences; raw deltas and reasoning never generate pushes.
-          if (e.stream === 'assistant' && d.committedMessageSeq != null) {
-            forward({ source: 'assistant', id: d.itemId, agentId: e.agentId,
-              sessionKey: e.sessionKey, runId: e.runId,
-              text: visibleText({ ...d, role: 'assistant', content: d.text }) });
-          }
           if (e.stream === 'approval' && d.phase === 'requested' && d.kind === 'unknown') {
             forward({ source: 'approval', kind: 'approval', id: d.approvalId ?? d.itemId,
               agentId: e.agentId, sessionKey: e.sessionKey, runId: e.runId,
               text: d.message ?? d.title ?? 'An agent needs your approval.' });
           }
         });
-        ctx.logger.info('ios-message-notify: listening for committed visible messages');
+        ctx.logger.info('ios-message-notify: listening for completed responses and attention requests');
       },
-      async stop() { unsub?.(); unsubAgent?.(); unsub = undefined; unsubAgent = undefined; await notifier?.stop(); notifier = undefined; },
+      async stop() { unsubAgent?.(); unsubAgent = undefined; await notifier?.stop(); notifier = undefined; },
     });
-    let unsub: (() => void) | undefined;
     let unsubAgent: (() => void) | undefined;
     api.on('before_tool_call', (e, ctx) => {
       if (!['ask_user', 'request_user_input'].includes(e.toolName)) return;

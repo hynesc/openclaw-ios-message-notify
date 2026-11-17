@@ -1,8 +1,8 @@
 {
   "id": "ios-message-notify",
   "name": "iOS Message Notifications",
-  "description": "Native iPhone notifications for visible agent messages and questions.",
-  "version": "0.1.0",
+  "description": "Native iPhone notifications for completed responses, questions, and approvals.",
+  "version": "0.1.1",
   "configSchema": {
     "type": "object",
     "properties": {

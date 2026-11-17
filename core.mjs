@@ -72,7 +72,7 @@ export class Notifier {
     const record = { signature, runId: e.runId, ids: id ? [id] : [], sources: [e.source], at: now, status: 'pending' };
     this.records.push(record);
     await this.save();
-    const title = `${e.agentId || 'Agent'} · ${e.kind === 'question' ? 'Needs your answer' : e.kind === 'approval' ? 'Approval needed' : 'New message'}`;
+    const title = `${e.agentId || 'Agent'} · ${e.kind === 'question' ? 'Needs your answer' : e.kind === 'approval' ? 'Approval needed' : e.kind === 'completed' ? 'Response finished' : 'New message'}`;
     const body = this.config.genericPreview ? 'Open OpenClaw to view the update.' : Array.from(clean(e.text)).slice(0, 200).join('');
     for (let attempt = 0; attempt < 3 && this.active; attempt++) {
       try { await this.send(title, body); record.status = 'accepted'; await this.save(); return; }

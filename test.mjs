@@ -61,32 +61,43 @@ test('transcript without run metadata deduplicates the final observer', async ()
   await n.accept({ ...base, source: 'final', id: 'final' });
   assert.equal(sent.length, 1);
 });
-test('service adapters deliver committed messages and questions and unsubscribe', async () => {
+test('service alerts only on completion and attention requests, never intermediate activity', async () => {
   const { stripTypeScriptTypes } = await import('node:module');
   const { readFile } = await import('node:fs/promises');
   let code = stripTypeScriptTypes(await readFile(new URL('./index.ts', import.meta.url), 'utf8'));
   code = code.replace(/import .* from 'openclaw\/plugin-sdk\/plugin-entry';/, 'const definePluginEntry = x => x; const buildJsonPluginConfigSchema = x => x;');
   code = code.replace("'./core.mjs'", JSON.stringify(new URL('./core.mjs', import.meta.url).href));
   const { default: plugin } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
-  const hooks = {}; let service, transcript, agent, removed = 0; const sent = [];
+  const hooks = {}; let service, agent, removed = 0; const sent = [];
   const original = Transport.prototype.send;
   Transport.prototype.send = async (...args) => { sent.push(args); };
   try {
     plugin.register({ pluginConfig: {}, on: (k, h) => hooks[k] = h,
       registerService: s => service = s, registerCli() {},
       runtime: { events: {
-        onSessionTranscriptUpdate(h) { transcript = h; return () => removed++; },
+        onSessionTranscriptUpdate() { throw Error('Intermediate transcript subscription must not be registered'); },
         onAgentEvent(h) { agent = h; return () => removed++; },
       } } });
     await service.start({ stateDir: await mkdtemp(join(tmpdir(), 'ios-service-')), logger: { info() {}, warn() {} } });
-    transcript({ target: { agentId: 'main', sessionKey: base.sessionKey }, messageId: 'msg', message: { role: 'assistant', content: 'Progress' } });
-    hooks.message_sent({ success: false, content: 'undelivered' }, { sessionKey: base.sessionKey });
+    assert.equal(hooks.message_sent, undefined);
+    agent({ ...base, stream: 'assistant', data: { text: 'Progress', committedMessageSeq: 1 } });
+    agent({ ...base, stream: 'thinking', data: { text: 'hidden' } });
+    await new Promise(r => setTimeout(r, 20));
+    assert.equal(sent.length, 0);
+    hooks.agent_end({ success: false, runId: 'failed', messages: [{ role: 'assistant', content: 'Partial answer' }] }, base);
+    hooks.agent_end({ success: true, runId: 'silent', messages: [{ role: 'assistant', content: 'NO_REPLY' }] }, base);
+    const completed = { success: true, runId: 'done', messages: [
+      { role: 'assistant', content: 'Progress' }, { role: 'assistant', content: 'Finished' },
+    ] };
+    hooks.agent_end(completed, base);
+    hooks.agent_end(completed, base); // replay must not generate a second completion alert
+    hooks.agent_end({ ...completed, runId: 'another-run' }, base); // same answer in another run is distinct
     hooks.before_tool_call({ toolName: 'ask_user', params: { question: 'Which option?' } }, { ...base, toolCallId: 'question' });
     agent({ ...base, stream: 'thinking', data: { text: 'hidden' } });
     agent({ ...base, stream: 'approval', data: { phase: 'requested', kind: 'exec', title: 'Native handles this' } });
     // Wait for the asynchronous service queue to settle before shutdown.
-    for (let i = 0; i < 50 && sent.length < 2; i++) await new Promise(r => setTimeout(r, 10));
-    assert.equal(sent.length, 2); assert.equal(sent[0][1], 'Progress'); assert.equal(sent[1][1], 'Which option?');
-    await service.stop(); assert.equal(removed, 2);
+    for (let i = 0; i < 50 && sent.length < 3; i++) await new Promise(r => setTimeout(r, 10));
+    assert.equal(sent.length, 3); assert.equal(sent[0][1], 'Finished'); assert.match(sent[0][0], /Response finished/); assert.equal(sent[1][1], 'Finished'); assert.equal(sent[2][1], 'Which option?');
+    await service.stop(); assert.equal(removed, 1);
   } finally { Transport.prototype.send = original; }
 });

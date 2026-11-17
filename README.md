@@ -1,15 +1,19 @@
 # iOS Message Notifications
 
-Local OpenClaw gateway plugin for the official iOS app. Tested on OpenClaw
+Local OpenClaw gateway plugin for the official iOS app. Version 0.1.1 notifies on response completion and attention requests. Tested on OpenClaw
 2026.11.3. Uses the existing `nodes push` / `push.test` path and the official
 relay; no new server, APNs keys, runtime dependencies, or model calls.
 
 ## Behavior
 
-- Sends an alert for each committed visible assistant message across sessions,
-  agents, scheduled runs, and successful channel deliveries. Streaming tokens
-  wait for a committed message. Hidden reasoning, silent responses and internal
-  subagent/ACP sessions do not produce alerts.
+- Sends one alert when an agent successfully finishes its response, using the
+  final visible reply as the preview. Intermediate messages, tool activity, and
+  reasoning do not generate notifications. Silent responses (`NO_REPLY` and
+  `HEARTBEAT_OK`), failed/aborted runs, and internal subagent/ACP sessions are skipped.
+- Completion alerts use `agent_end`; transcript commits and outbound message
+  delivery do not trigger alerts. This applies to user and scheduled runs that
+  produce a final visible reply. Messages sent outside a completed agent run,
+  or tool-only sends followed by a silent final reply, do not trigger alerts.
 - Questions from `ask_user` and `request_user_input` notify before the tool waits.
   Native exec and plugin approvals retain OpenClaw's existing push delivery and
   interactive actions; unknown-kind agent approval events receive a generic alert.
@@ -18,7 +22,7 @@ relay; no new server, APNs keys, runtime dependencies, or model calls.
 - Always sends regardless of foreground presence or time. iOS permission and
   Focus settings determine presentation. Tapping uses the app's existing routing;
   the gateway push RPC cannot select a conversation.
-- Correlates transcript, delivery, and completion observations. Stores only hashes,
+- Deduplicates completion events by run identity. Stores only hashes,
   message IDs, observer identities, timestamps, and acceptance/failure status locally
   (up to 1,000 recent entries, retained for 24 hours); preview text is not persisted.
 - Sends asynchronously, with three attempts and 1s/2s backoff. Failed sends are
@@ -74,9 +78,10 @@ command supports tool/feature authoring contracts, not this service plugin;
 `plugins doctor` and runtime inspection validate its loading and configuration.
 
 Tests cover visibility, attachments, repeated messages, correlation, restarts,
-filters, Unicode previews, retries, device selection, and service hook adapters.
-Automatic transcript observation and production relay acceptance were also verified
-with an isolated gateway smoke test.
+filters, Unicode previews, retries, device selection, and completion/attention adapters.
+Regression coverage verifies no intermediate alerts and one completion per run.
+Production relay acceptance was verified with the gateway push transport.
+Completion and question handling are covered by the service adapter tests.
 Real model-driven questions and native interactive approvals still need phone-side
 verification. First pair the official app, grant notification permission, and let
 it finish registering for push. If delivery fails, check registration, connectivity
