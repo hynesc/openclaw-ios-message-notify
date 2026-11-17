@@ -89,7 +89,8 @@ to `ios-push-relay.openclaw.ai`, and gateway logs.
 
 ## Update or disable
 
-After source edits: `openclaw plugins reload ios-message-notify`.
+After source edits: `openclaw plugins reload ios-message-notify`. The plugin
+declares turn handover, so reload can switch active turns at their next model step.
 
 Rollback: `openclaw plugins disable ios-message-notify`. This stops the service
 without affecting native approval pushes or other plugins. The gateway retains
