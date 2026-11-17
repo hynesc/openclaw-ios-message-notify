@@ -1,0 +1,37 @@
+{
+  "id": "ios-message-notify",
+  "name": "iOS Message Notifications",
+  "description": "Native iPhone notifications for visible agent messages and questions.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "nodeId": {
+        "type": "string"
+      },
+      "openclawBinary": {
+        "type": "string"
+      },
+      "genericPreview": {
+        "type": "boolean",
+        "default": false
+      },
+      "agents": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "sessions": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "additionalProperties": false
+  },
+  "activation": {
+    "onStartup": true
+  }
+}
